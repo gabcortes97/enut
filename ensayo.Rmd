@@ -1,0 +1,194 @@
+---
+title: "Ensayo"
+author: "Gabriel"
+date: "2024-12-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Cargar Librerías
+
+```{r cargar-librerias}
+
+library(pacman)
+p_load(tidyverse,
+       readr, #para leer csv
+       haven,
+       survey,
+       srvyr) #para leer stata y spss
+
+```
+
+# Cargar bases
+
+```{r carga-base}
+
+data <- read.csv("input/enut2015.csv", sep=";",
+                   dec= ",") #read_delim para separar por comas
+
+# sav <- read_sav("input/enut.sav")
+# dta <- read_dta("input/enut.dta")
+
+
+
+data <- data %>% mutate(across(starts_with(c("m",
+                                             "n",
+                                             "o",
+                                             "p")), ~ifelse(.==96, 0, .)))
+
+promedio <- data %>% filter(p_trab_scn_dt==1) %>% summarise(promedio=mean(trab_scn_dt, na.rm=T))
+
+```
+
+# Variables de interés
+
+## Trabajo en la ocupación y producción de bienes para el autoconsumo
+
+Día de la semana
+
+```{r trab-scn-ds}
+
+data <- data %>%
+  mutate(p_trab_scn_ds2 = case_when(
+      (m11_1_1 == 1 | o63_1_1 == 1 | o42_1_1 == 1) & tiempo == 1 & c14_1_1 >= 15 ~ 1,
+      tiempo == 1 & c14_1_1 >= 15 ~ 0))
+
+table(data$p_trab_scn_ds2)
+table(data$p_trab_scn_ds)
+
+trab_scn_ds2 <- data %>%
+  mutate(trab_scn_ds2 = rowSums(select(., "m11_1_2", "o63_1_2", "o42_1_2"), na.rm = TRUE)) %>% select(trab_scn_ds2)
+
+data <- cbind(data, trab_scn_ds2)
+
+data %>% filter(tiempo==1 & c14_1_1>=15 & p_trab_scn_ds==1) %>%
+  summarise(promedio_o= mean(trab_scn_ds, na.rm=T),
+            promedio_r= mean(trab_scn_ds2, na.rm=T))
+
+```
+
+Fin de semana
+
+```{r trab-scn-fds}
+
+data <- data %>%
+  mutate(p_trab_scn_fds2 = case_when(
+      (m11_2_1 == 1 | o63_2_1 == 1 | o42_2_1 == 1) & tiempo == 1 & c14_1_1 >= 15 ~ 1,
+      tiempo == 1 & c14_1_1 >= 15 ~ 0))
+
+table(data$p_trab_scn_fds2)
+table(data$p_trab_scn_fds)
+
+trab_scn_fds2 <- data %>%
+  mutate(trab_scn_fds2 = rowSums(select(., "m11_2_2", "o63_2_2", "o42_2_2"), na.rm = TRUE)) %>% select(trab_scn_fds2)
+
+data <- cbind(data, trab_scn_fds2)
+
+data %>% filter(tiempo==1 & c14_1_1>=15 & p_trab_scn_fds==1) %>%
+  summarise(promedio_o= mean(trab_scn_fds, na.rm=T),
+            promedio_r= mean(trab_scn_fds2, na.rm=T))
+
+```
+
+Día tipo
+
+```{r trab-scn-dt}
+
+data <- data %>%
+  mutate(p_trab_scn_dt2= case_when(p_trab_scn_ds2==1|p_trab_scn_fds2==1 ~ 1,
+         p_trab_scn_ds2==0|p_trab_scn_fds2==0 ~ 0))
+
+table(data$p_trab_scn_dt)
+table(data$p_trab_scn_dt2)
+
+data <- data %>% mutate(trab_scn_dt2= trab_scn_ds2*(5/7) + trab_scn_fds2*(2/7))
+
+data %>% filter(p_trab_scn_dt2==1) %>%
+  summarise(promedio_o= mean(trab_scn_dt, na.rm=T),
+            promedio_r= mean(trab_scn_dt2, na.rm=T))
+  
+```
+
+## Trabajo en la Ocupación y Traslados Asociados
+
+Participación
+
+```{r p_tot}
+
+data <- data %>% 
+  mutate(p_tot_ds2=
+           case_when(
+             m11_1_1==1 & tiempo==1 & c14_1_1>=15 & cae==2 ~ 1,
+             tiempo==1 & c14_1_1>=15 & cae==2 ~ 0),
+         p_tot_fds2=
+           case_when(
+             m11_2_1==1 & tiempo==1 & c14_1_1>=15 & cae==2 ~ 1,
+             tiempo==1 & c14_1_1>=15 & cae==2 ~ 0),
+         p_tot_dt2=
+           case_when(
+             p_tot_ds2==1|p_tot_fds2  ~ 1,
+             p_tot_ds2==0|p_tot_fds2  ~ 0
+           )
+         )
+
+table(data$p_tot_ds)
+table(data$p_tot_ds2)
+table(data$p_tot_fds)
+table(data$p_tot_fds2)
+table(data$p_tot_dt)
+table(data$p_tot_dt2)
+
+```
+
+Tiempo
+
+```{r tot}
+
+tot_ds2 <- data %>%
+  mutate(tot_ds2 = rowSums(select(., "m11_1_2", "m12_1_1", "m12_1_2"), na.rm = TRUE)) %>% select(tot_ds2)
+
+tot_fds2 <- data %>%
+  mutate(tot_fds2 = rowSums(select(., "m11_2_2", "m12_2_1", "m12_2_2"), na.rm = TRUE)) %>% select(tot_fds2)
+
+data <- cbind(data, tot_ds2, tot_fds2)
+
+data %>% filter(tiempo==1 & c14_1_1>=15 & cae==2 & p_tot_ds2==1) %>%
+  summarise(promedio_o= mean(tot_ds, na.rm=T),
+            promedio_r= mean(tot_ds2, na.rm=T))
+
+data %>% filter(tiempo==1 & c14_1_1>=15 & cae==2 & p_tot_fds2==1) %>%
+  summarise(promedio_o= mean(tot_fds, na.rm=T),
+            promedio_r= mean(tot_fds2, na.rm=T))
+
+
+data <- data %>% mutate(tot_dt2= tot_ds2*(5/7)+tot_fds2*(2/7))
+
+data %>% filter(p_tot_dt2==1) %>%
+  summarise(promedio_o= mean(tot_dt, na.rm=T),
+            promedio_r= mean(tot_dt2, na.rm=T))
+
+
+```
+
+```{r}
+options(survey.lonely.psu = "certainty")
+
+data_srvy <- data %>%
+  filter(wgt2!=is.na(wgt2)) %>%
+  as_survey_design(VarUnit,
+                   strata = VarStrat,
+                   weights = wgt2)
+
+data_srvy %>% filter(p_tot_dt==1 | p_tot_dt==0) %>%
+  group_by(p_tot_dt) %>% dplyr::summarize(
+    participacion = round(survey_total(vartype = NULL)),
+participacion_porc = round(survey_prop(vartype = "se")*100, 1) )
+
+data_srvy %>% filter(p_tot_dt==1) %>%
+  summarise(media_total= survey_mean(tot_dt, vartype = NULL))
+
+```
+

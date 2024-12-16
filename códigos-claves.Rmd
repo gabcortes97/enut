@@ -1,0 +1,177 @@
+---
+title: "Códigos Clave"
+author: "Gabriel"
+date: "2024-12-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Para Cargar Librerías
+
+```{r cargar-librerias}
+
+library(pacman)
+p_load(tidyverse,
+       # haven, por si tengo que leer stata o spss
+       survey, #para incorporar el diseño muestral
+       srvyr,
+       kableExtra)  #para incorporar el diseño muestral
+
+```
+
+# Cargar bases
+
+```{r}
+data <- read.csv("input/enut2015.csv", sep=";",
+                   dec= ",") #read_delim para separar por comas
+
+# sav <- read_sav("input/enut.sav")
+# dta <- read_dta("input/enut.dta")
+
+```
+
+# Tratamiento de datos pérdidos
+
+```{r}
+data <- data %>% mutate(across(starts_with(c("m",
+                                             "n",
+                                             "o",
+                                             "p")), ~ifelse(.==96, 0, .))) 
+                                              #Alt. ~na_if(., 96) depende del tratamiento que haya que darle
+
+```
+
+# Etiquetas
+
+```{r}
+
+# Etiqueta de variable
+attr(data$c13_1_1, "label") <- "Sexo"
+attr(data$wgt2, "label") <- "Factor de Expansión"
+
+# Etiquetas de valores
+
+data$c13_1_1 <- factor(data$c13_1_1, levels = c(1,2), # Valores
+                       labels = c("Hombre", "Mujer")) # Etiquetas
+
+table(data$c13_1_1)
+
+```
+
+# Construir variables secundarias
+
+```{r}
+# Participación
+
+data <- data %>% 
+  mutate(p_tot_ds2=
+           case_when(
+             m11_1_1==1 & tiempo==1 & c14_1_1>=15 & cae==2 ~ 1,
+             tiempo==1 & c14_1_1>=15 & cae==2 ~ 0),
+         p_tot_fds2=
+           case_when(
+             m11_2_1==1 & tiempo==1 & c14_1_1>=15 & cae==2 ~ 1,
+             tiempo==1 & c14_1_1>=15 & cae==2 ~ 0),
+         p_tot_dt2=
+           case_when(
+             p_tot_ds2==1|p_tot_fds2  ~ 1,
+             p_tot_ds2==0|p_tot_fds2  ~ 0
+           )
+         )
+
+table(data$p_tot_ds2)
+table(data$p_tot_fds2)
+table(data$p_tot_dt2)
+
+# Tiempo
+
+tot_ds2 <- data %>%
+  mutate(tot_ds2 = rowSums(select(., "m11_1_2", "m12_1_1", "m12_1_2"), na.rm = TRUE)) %>% select(tot_ds2)
+
+tot_fds2 <- data %>%
+  mutate(tot_fds2 = rowSums(select(., "m11_2_2", "m12_2_1", "m12_2_2"), na.rm = TRUE)) %>% select(tot_fds2)
+
+data <- cbind(data, tot_ds2, tot_fds2)
+
+data %>% filter(tiempo==1 & c14_1_1>=15 & cae==2 & p_tot_ds2==1) %>%
+  summarise(promedio_o= mean(tot_ds, na.rm=T),
+            promedio_r= mean(tot_ds2, na.rm=T))
+
+data %>% filter(tiempo==1 & c14_1_1>=15 & cae==2 & p_tot_fds2==1) %>%
+  summarise(promedio_o= mean(tot_fds, na.rm=T),
+            promedio_r= mean(tot_fds2, na.rm=T))
+
+
+data <- data %>% mutate(tot_dt2= tot_ds2*(5/7)+tot_fds2*(2/7))
+
+data %>% filter(p_tot_dt2==1) %>%
+  summarise(promedio_o= mean(tot_dt, na.rm=T),
+            promedio_r= mean(tot_dt2, na.rm=T))
+```
+
+
+# Incorporar el diseño muestral
+```{r}
+# Establecer la opción para manejar PSU solitarias (Primary Sampling Units) como unidades de certeza.
+# Esto es relevante para el análisis de encuestas con diseños complejos, para evitar sesgos
+# cuando hay solo una PSU en un estrato.
+# options(survey.lonely.psu = "certainty")
+
+# Convertir el conjunto de datos `data` en un objeto de diseño de encuesta utilizando `as_survey_design()`. Este objeto es necesario para aplicar métodos adecuados de estimación y análisis en encuestas complejas.
+data_srvy <- data %>%
+  filter(wgt2!=is.na(wgt2)) %>% #Excluis casos perdidos
+  as_survey_design(  # Función de `srvyr` para crear un diseño de encuesta.
+    VarUnit,           # Conglomerado
+    strata = VarStrat, # Estrato.
+    weight = wgt2 # Factor de expansión
+  )
+```
+
+# Estadísticos descriptivos
+
+```{r grafico1}
+
+tab1 <- data_srvy %>% filter(p_trab_fscn_dt==1|p_trab_fscn_dt==0) %>%
+  group_by(c13_1_1,
+                       p_trab_fscn_dt) %>%
+  summarise(prop_part=(round(survey_prop(vartype="ci")*100,2)),
+            promedio_fscn= round(survey_mean(trab_fscn_dt, vartype = "ci"),2)) %>% 
+  filter(p_trab_fscn_dt==1)
+
+tab1 %>%
+  select(Sexo=c13_1_1,
+         participacion_dt= prop_part,
+         limite_inferior_part=prop_part_low,
+         limite_superior_part=prop_part_upp,
+         promedio_horas_dt= promedio_fscn,
+         limite_inferior_prom=promedio_fscn_low,
+         limite_superior_prom=promedio_fscn_upp) %>%
+  kbl(caption= "Tabla 1: Participación y horas de trabajo doméstico no remunerado por sexo") %>%
+  kable_minimal()
+
+# Crear el gráfico
+
+graf1 <- tab1 %>% select(c13_1_1,
+                         promedio_fscn,
+                         promedio_fscn_low,
+                         promedio_fscn_upp) %>%
+  ggplot(aes(x = c13_1_1, y = promedio_fscn, fill=c13_1_1)) +
+  geom_bar(stat = "identity", width = 0.7) +  # Barras
+  geom_errorbar(aes(ymin = promedio_fscn_low, ymax = promedio_fscn_upp), 
+                width = 0.2, color = "red") +  # Líneas de intervalo de confianza
+  geom_text(aes(x= c13_1_1, y= promedio_fscn/2,
+                  label = round(promedio_fscn, 2)), #Para poner la etiqueta justo en el medio
+            color = "black", size = 4,  # Tamaño de la etiqueta
+            vjust= 0.5) +  # Mueve las etiquetas al centro de las barras
+   # Etiquetas sobre las barras
+  theme_minimal() +
+  labs(x = "Sexo", y = "Promedio Horas", 
+       title = "Promedio de horas dedicas al trabajo no remunerado por sexo") +
+  theme(legend.position = "none")
+
+graf1
+
+```
